@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Agent Bridge — Your local agents, reachable from Muse</title>
+  <meta name="description" content="Local Agent Bridge connects Meta's Muse personal agent to your own in-home and local AI agents, without your home data leaving the house.">
+  <link rel="icon" type="image/png" href="assets/icon-512.png">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap nav">
+    <a class="brand" href="index.html">
+      <img src="assets/icon-512.png" alt="Local Agent Bridge logo">
+      Local Agent Bridge
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html" aria-current="page">Home</a></li>
+      <li><a href="privacy.html">Privacy</a></li>
+      <li><a href="terms.html">Terms</a></li>
+    </ul>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="hero">
+    <img class="hero-icon" src="assets/icon-512.png" alt="Local Agent Bridge logo">
+    <h1>Local Agent <span class="accent">Bridge</span></h1>
+    <p class="tagline">Your own local agents — Hermes, OpenClaw, Home Assistant — reachable from Muse, without your home data leaving the house.</p>
+  </div>
+
+  <section class="block">
+    <h2>What <span class="accent">it is</span></h2>
+    <p class="lead">Local Agent Bridge is a small open-source app you run on your own machine, plus a privacy-first relay. It lets Meta's Muse personal agent talk to the AI agents you already run locally — your home automation, your open-source assistants, your local models. Your home dials out to the relay when you ask for something; nothing ever dials in. Your data stays yours.</p>
+  </section>
+
+  <section class="block">
+    <h2>How <span class="accent">it works</span></h2>
+    <ol class="steps">
+      <li class="step">
+        <span class="num">1</span>
+        <h3>Install the bridge</h3>
+        <p>Install the open-source bridge app on your own machine and point it at your local agents.</p>
+      </li>
+      <li class="step">
+        <span class="num">2</span>
+        <h3>Pair with Muse</h3>
+        <p>Pair it with Muse using a one-time code. The pairing token stays on your machine and can be revoked anytime by deleting it.</p>
+      </li>
+      <li class="step">
+        <span class="num">3</span>
+        <h3>Just ask</h3>
+        <p>Ask Muse to work with your local agents, in plain conversation.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section class="block">
+    <h2>Example <span class="accent">prompts</span></h2>
+    <ul class="prompts">
+      <li>Ask my home agent whether the front door is locked.</li>
+      <li>Have my local assistant check the living room camera and tell me if the cats are on the couch.</li>
+      <li>Tell my OpenClaw agent to download tonight's file and shut the server down after.</li>
+      <li>Ask Hermes for a summary of today's smart home activity.</li>
+    </ul>
+  </section>
+
+  <section class="block">
+    <h2>Privacy <span class="accent">by design</span></h2>
+    <div class="card">
+      <ul>
+        <li><strong>Your home dials out; nothing dials in.</strong> The bridge only makes outbound connections. There is no inbound port, no remote access to your machine, ever.</li>
+        <li><strong>Task data is relayed and discarded.</strong> Tasks pass through the relay to reach your bridge and are then forgotten — never stored, never mined, never sold.</li>
+        <li><strong>No accounts, no analytics, no tracking.</strong> The relay holds no personal information. Pairing tokens live only on your machine.</li>
+      </ul>
+      <p>Read the full <a href="privacy.html" style="color: var(--teal);">privacy policy</a> — it's short and plain-spoken.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>Open <span class="accent">source</span></h2>
+    <div class="card">
+      <p>The bridge app is open source. You can read exactly what runs on your machine, audit what it sends, and run it yourself. Transparency is the point: the bridge only works because you can verify it does nothing it shouldn't.</p>
+      <p style="color: var(--text-muted);">Repository link coming soon — the code will be published with the connector launch.</p>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>Support</h2>
+    <div class="card support-box">
+      <div>
+        <p style="margin: 0 0 6px;">Questions, problems, or feature ideas? Write to</p>
+        <a class="mailto" href="mailto:tjtelendallc@gmail.com">tjtelendallc@gmail.com</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="terms.html">Terms</a>
+    </nav>
+    <p>Local Agent Bridge — an independent project by Trent Telenda. Not affiliated with Meta.</p>
+  </div>
+</footer>
+
+</body>
+</html>

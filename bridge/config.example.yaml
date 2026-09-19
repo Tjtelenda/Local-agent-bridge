@@ -1,0 +1,94 @@
+# Example config for the Local Agent Bridge daemon.
+# Copy to config.yaml and edit. NO secrets in this file; see notes below.
+#
+# Paths: token_file accepts a leading ~ (resolved to the user's home dir).
+
+relay_url: "wss://relay.example.com/v1/bridge"
+
+# Where the pairing token is stored after device-flow pairing (mode 600).
+token_file: "~/.local-agent-bridge/token"
+
+# Actions that may run without user confirmation, even when read_only: false.
+# Stored on the user's own machine; routine, low-risk actions only.
+auto_approve:
+  - light_turn_on
+  - light_turn_off
+
+agents:
+  # ---- Hermes: local AI agent with an HTTP API ----
+  - name: hermes
+    type: hermes
+    url: "http://localhost:8765/api/tasks"
+    actions:
+      - name: ask
+        read_only: true
+        description: "Ask Hermes a question; returns its answer."
+      - name: summarize_inbox
+        read_only: true
+        description: "Summarize new messages since last check."
+
+  # ---- OpenClaw: local automation gateway ----
+  - name: openclaw
+    type: openclaw
+    url: "http://localhost:18789/api/task"
+    actions:
+      - name: run_workflow
+        read_only: false
+        description: "Run an OpenClaw workflow by name."
+
+  # ---- Home Assistant: local HA REST API ----
+  - name: homeassistant
+    type: homeassistant
+    base_url: "http://homeassistant.local:8123"
+    # Token: set the HASS_TOKEN env var (preferred), or 'token:' here.
+    # NEVER log or share this value.
+    actions:
+      - name: get_state
+        read_only: true
+        description: "Read an entity state. Input: {entity_id}."
+      - name: call_service
+        read_only: false
+        description: "Call a HA service. Input: {domain, service, entity_id?, data?}."
+    # Optional: entity polled for event rules below.
+    poll_entity: "binary_sensor.front_door"
+
+  # ---- Webhook: generic HTTP POST ----
+  - name: notifier
+    type: webhook
+    url: "http://localhost:9999/hook"
+    actions:
+      - name: send_notification
+        read_only: true
+        description: "Forward a message to a local notification sink."
+
+  # ---- Command: shell exec, allowlist only ----
+  - name: system
+    type: command
+    # ONLY these exact commands may run. Anything else is refused.
+    allowlist:
+      - "df -h /"
+      - "uptime"
+    actions:
+      - name: disk_usage
+        read_only: true
+        command: "df -h /"
+        description: "Report disk usage of /."
+      - name: uptime
+        read_only: true
+        command: "uptime"
+        description: "Report system uptime."
+
+# ---- Events: poll a local source on an interval; on change, push up ----
+# Each rule: agent (must have a pollable adapter), event name, interval
+# (seconds), and an optional match spec:
+#   match: {key: "state", from: "off", to: "on"}   # dotted key path
+# Without match, ANY change fires. Payloads pushed up are metadata-only
+# (changed key names), never raw contents.
+events:
+  - agent: homeassistant
+    event: front_door_opened
+    interval: 30
+    match: {key: "state", from: "off", to: "on"}
+  - agent: notifier
+    event: hook_changed
+    interval: 60

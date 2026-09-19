@@ -1,0 +1,20 @@
+[Unit]
+Description=Local Agent Bridge daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust paths to your install. The bridge needs no inbound ports.
+ExecStart=/usr/bin/python3 /home/%i/local-agent-bridge/bridge/bridge.py --config /home/%i/local-agent-bridge/bridge/config.yaml
+Restart=on-failure
+RestartSec=10
+# The bridge reads HASS_TOKEN (Home Assistant token) only from the
+# environment; keep it out of the config file. If you use the
+# homeassistant adapter, set it here via EnvironmentFile, e.g.:
+#   EnvironmentFile=/home/%i/.local-agent-bridge/env
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
