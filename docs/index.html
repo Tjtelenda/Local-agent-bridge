@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local Agent Bridge — Your local agents, reachable from Muse</title>
-  <meta name="description" content="Local Agent Bridge connects Meta's Muse personal agent to your own in-home and local AI agents, without your home data leaving the house.">
+  <meta name="description" content="Local Agent Bridge connects Meta's Muse personal agent to your own in-home and local AI agents, with task inputs and results passing through a relay.">
   <link rel="icon" type="image/png" href="assets/icon-512.png">
   <link rel="stylesheet" href="assets/style.css">
 </head>
@@ -29,12 +29,13 @@
   <div class="hero">
     <img class="hero-icon" src="assets/icon-512.png" alt="Local Agent Bridge logo">
     <h1>Local Agent <span class="accent">Bridge</span></h1>
-    <p class="tagline">Your own local agents — Hermes, OpenClaw, Home Assistant — reachable from Muse, without your home data leaving the house.</p>
+    <p class="tagline">Your own local agents — Hermes, OpenClaw, Home Assistant — reachable from Muse, with task inputs and results passing through a relay.</p>
   </div>
 
   <section class="block">
+    <p><strong>Project status:</strong> Application submitted to the Meta Connections team; review and approval are pending. Meta/Muse delivery remains a logging stub; the local bridge and relay demo work.</p>
     <h2>What <span class="accent">it is</span></h2>
-    <p class="lead">Local Agent Bridge is a small open-source app you run on your own machine, plus a privacy-first relay. It lets Meta's Muse personal agent talk to the AI agents you already run locally — your home automation, your open-source assistants, your local models. Your home dials out to the relay when you ask for something; nothing ever dials in. Your data stays yours.</p>
+    <p class="lead">Local Agent Bridge is a small open-source app you run on your own machine, plus a privacy-first relay. It provides a prototype API for local agents; Meta/Muse integration is not implemented. It can reach agents you run locally — your home automation, your open-source assistants, your local models. Your home dials out to the relay when you ask for something; nothing ever dials in. Your data stays yours.</p>
   </section>
 
   <section class="block">
@@ -48,12 +49,12 @@
       <li class="step">
         <span class="num">2</span>
         <h3>Pair with Muse</h3>
-        <p>Pair it with Muse using a one-time code. The pairing token stays on your machine and can be revoked anytime by deleting it.</p>
+        <p>Pair an API client using a one-time code. The bridge stores a token locally; credentials also live in relay memory until the relay restarts.</p>
       </li>
       <li class="step">
         <span class="num">3</span>
         <h3>Just ask</h3>
-        <p>Ask Muse to work with your local agents, in plain conversation.</p>
+        <p>Submit tasks through the relay API. Writes require approval at the local bridge terminal unless explicitly auto-approved in local configuration.</p>
       </li>
     </ol>
   </section>
@@ -72,9 +73,9 @@
     <h2>Privacy <span class="accent">by design</span></h2>
     <div class="card">
       <ul>
-        <li><strong>Your home dials out; nothing dials in.</strong> The bridge only makes outbound connections. There is no inbound port, no remote access to your machine, ever.</li>
+        <li><strong>Your home dials out; nothing dials in.</strong> The bridge only makes outbound connections. There is no inbound bridge port. The connected relay can request configured actions.</li>
         <li><strong>Task data is relayed and discarded.</strong> Tasks pass through the relay to reach your bridge and are then forgotten — never stored, never mined, never sold.</li>
-        <li><strong>No accounts, no analytics, no tracking.</strong> The relay holds no personal information. Pairing tokens live only on your machine.</li>
+        <li><strong>No accounts, no analytics, no tracking.</strong> Task results can contain personal information. Pairing credentials live in relay memory and the bridge token file.</li>
       </ul>
       <p>Read the full <a href="privacy.html" style="color: var(--teal);">privacy policy</a> — it's short and plain-spoken.</p>
     </div>

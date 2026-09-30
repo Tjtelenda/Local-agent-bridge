@@ -72,6 +72,8 @@ pending_codes: Dict[str, Dict[str, Any]] = {}
 task_results: Dict[str, Dict[str, Any]] = {}
 # task_id -> asyncio.Future waiting on the bridge's reply
 pending_tasks: Dict[str, asyncio.Future] = {}
+# Task IDs are bound to their paired bridge before dispatch.
+task_owners: Dict[str, str] = {}
 
 # --- counters only, never contents -------------------------------------------
 counters = {"tasks_relayed": 0, "task_errors": 0, "pairings_completed": 0}
@@ -143,6 +145,7 @@ async def _sweeper():
             del pending_codes[code]  # counter only; code value never logged
         for tid in [t for t, v in task_results.items() if v["expires"] <= now]:
             del task_results[tid]
+            task_owners.pop(tid, None)
 
 
 @app.on_event("startup")
@@ -205,7 +208,7 @@ async def pair(req: PairRequest):
         "paired": True,
         "pairing_token": pairing_token,
         "api_key": api_key,
-        "note": "pairing_token is delivered to your bridge automatically over its pairing socket; if that fails, paste it into your bridge config manually. Use api_key as the bearer key on Meta-facing calls.",
+        "note": "pairing_token is delivered to your bridge automatically over its pairing socket; if that fails, save it in the configured token_file manually. Use api_key as the bearer key on Meta-facing calls.",
     }
 
 
@@ -230,8 +233,8 @@ async def submit_task(req: TaskRequest, api_key: str = Depends(require_api_key))
     """Submit a task to a local agent via the caller's paired bridge.
 
     Forwards over the bridge's socket and waits for its reply (configurable
-    timeout). The response always surfaces `requires_confirmation` so Muse
-    knows to ask the user before state-changing actions.
+    timeout). A pending_approval response means no action has executed.
+    Approval occurs only at the local bridge terminal; poll GET for completion.
     """
     bridge = _bridge_for_key(api_key)
     if bridge is None or bridge.socket is None:
@@ -246,6 +249,10 @@ async def submit_task(req: TaskRequest, api_key: str = Depends(require_api_key))
     loop = asyncio.get_running_loop()
     future: asyncio.Future = loop.create_future()
     pending_tasks[task_id] = future
+    task_owners[task_id] = api_keys[api_key]
+    task_results[task_id] = {"id": task_id, "ok": False, "status": "dispatched",
+                             "requires_confirmation": True,
+                             "expires": _now() + TASK_TTL_SECONDS}
     try:
         await bridge.socket.send_text(json.dumps({
             "type": "task",
@@ -270,27 +277,20 @@ async def submit_task(req: TaskRequest, api_key: str = Depends(require_api_key))
     finally:
         pending_tasks.pop(task_id, None)
 
-    result = {
-        "id": task_id,
-        "ok": bool(reply.get("ok")),
-        "requires_confirmation": bool(reply.get("requires_confirmation", True)),
-    }
-    if reply.get("ok"):
-        result["result"] = reply.get("result")
-    else:
-        result["error"] = reply.get("error", "bridge reported failure")
-    task_results[task_id] = {**result, "expires": _now() + TASK_TTL_SECONDS}
     counters["tasks_relayed"] += 1
     log.info("task relayed total=%d", counters["tasks_relayed"])
-    return result
+    return reply
 
 
 @app.get("/v1/tasks/{task_id}", tags=["tasks"])
 async def get_task(task_id: str, api_key: str = Depends(require_api_key)):
     """Fetch a recent task result. Results expire after the TTL (default 5 min)."""
     entry = task_results.get(task_id)
+    if task_owners.get(task_id) != api_keys[api_key]:
+        raise HTTPException(status_code=404, detail="task result not found or expired")
     if entry is None or entry["expires"] <= _now():
         task_results.pop(task_id, None)
+        task_owners.pop(task_id, None)
         raise HTTPException(status_code=404, detail="task result not found or expired")
     return {k: v for k, v in entry.items() if k != "expires"}
 
@@ -353,6 +353,8 @@ async def bridge_channel(websocket: WebSocket):
             except json.JSONDecodeError:
                 await websocket.send_text(json.dumps({"type": "error", "detail": "invalid JSON"}))
                 continue
+            if not isinstance(msg, dict):
+                continue
             mtype = msg.get("type")
 
             if mtype == "request_code":
@@ -388,10 +390,26 @@ async def bridge_channel(websocket: WebSocket):
 
             elif mtype == "task_reply":
                 tid = msg.get("id")
+                if not isinstance(tid, str):
+                    continue
+                entry = task_results.get(tid)
+                if (bridge is None or bridge.socket is not websocket
+                        or task_owners.get(tid) != token or entry is None
+                        or entry["expires"] <= _now()):
+                    continue
+                if entry.get("status") not in ("dispatched", "pending_approval"):
+                    continue  # terminal replies cannot be overwritten/replayed
+                result = {"id": tid, "ok": msg.get("ok") is True,
+                          "requires_confirmation": msg.get("requires_confirmation") is True,
+                          "status": msg.get("status", "completed" if msg.get("ok") else "failed")}
+                if result["ok"]:
+                    result["result"] = msg.get("result")
+                else:
+                    result["error"] = msg.get("error", "bridge reported failure")
+                task_results[tid] = {**result, "expires": entry["expires"]}
                 fut = pending_tasks.get(tid)
                 if fut is not None and not fut.done():
-                    fut.set_result(msg)
-                # Unknown/late replies are ignored silently (counter-free).
+                    fut.set_result(result)
 
             elif mtype == "push_event":
                 if bridge is None:

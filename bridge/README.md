@@ -7,7 +7,8 @@ webhooks, shell commands), and pushes local events back up the socket.
 
 Nothing on the internet ever dials in: no listening sockets, no inbound ports,
 no port forwarding. The relay (built by a sibling piece of this project) just
-shuttles messages between Meta's Muse and this bridge.
+shuttles messages between an HTTP client and this bridge. Meta/Muse delivery
+is a logging stub, not an implemented integration.
 
 ## Install
 
@@ -22,7 +23,7 @@ python3 bridge.py --config ./config.yaml
 Config path can also come from the `BRIDGE_CONFIG` env var (default
 `./config.yaml`).
 
-Optional: install the systemd unit so it starts at boot:
+Optional Linux systemd template (headless writes requiring approval are denied):
 
 ```bash
 # copy local-agent-bridge.service to ~/.config/systemd/user/
@@ -40,9 +41,9 @@ unit's `EnvironmentFile` at it — never put the token in the YAML.
 1. On first run with no stored token, the bridge opens an anonymous socket
    to the relay and asks for a pairing code. The relay issues an 8-character
    code (no ambiguous chars like `0`/`O` or `1`/`I`) and the bridge prints:
-   > "In Muse, say 'connect my local agents' and enter this code."
+   > Submit this code to the relay using `POST /v1/pair`.
 2. The bridge waits on that socket for up to 10 minutes.
-3. When the user completes pairing in Muse (`POST /v1/pair`), the relay
+3. When a client completes pairing (`POST /v1/pair`), the relay
    pushes the pairing token back down the same socket. The bridge stores it
    in `~/.local-agent-bridge/token` with mode `0600` and reconnects.
 4. Every later run skips pairing and offers the stored token as a WebSocket
@@ -53,8 +54,7 @@ unit's `EnvironmentFile` at it — never put the token in the YAML.
 ```yaml
 relay_url: "wss://relay.example.com/v1/bridge"   # outbound WebSocket, required
 token_file: "~/.local-agent-bridge/token" # ~ resolves to the user's home
-auto_approve:                             # action names that skip confirmation
-  - light_turn_on
+auto_approve: []  # optional exact agent/action pairs; empty by default
 ```
 
 ### Agents
@@ -72,32 +72,29 @@ Adapter types:
 
 ### Actions and confirmations
 
-Every action must declare `read_only: true|false`:
+Every action must declare a YAML boolean `read_only: true|false`. A read-only
+label is a local policy assertion, not enforcement of the downstream API.
 
-- `read_only: true` — the bridge runs it and replies `{id, ok, result}`.
-- `read_only: false` — state-changing. The reply includes
-  `"requires_confirmation": true`, and Muse asks the user to confirm before
-  the action is allowed again. No confirmation is needed for `read_only`
-  actions.
+Writes require local terminal approval **before** the adapter is called. The
+first reply is `{id, ok: false, status: "pending_approval",
+requires_confirmation: true}`. Review the displayed request and local action
+configuration, then type `approve <task-id>` within 120 seconds. All other
+answers, EOF/unavailable terminals, exceptions, and expiry deny execution.
+The final reply has status `completed`, `denied`, `expired`, or `failed`.
+The caller polls the relay's `GET /v1/tasks/{id}` for the final outcome.
 
-`auto_approve:` is a list of action **names** stored on the user's own
-machine. A state-changing action whose name appears there skips confirmation —
-the user-side override for routine actions (e.g. turning lights on/off).
-Read-only actions never need it.
+No relay message or caller-controlled approval flag can grant approval.
+`auto_approve` is an optional local list of exact `agent/action` pairs; bare
+action names are rejected. A configured pair authorizes every input accepted
+by that action, so keep such actions narrowly constrained at the adapter.
 
-Task shape in, reply shape out:
-
-```json
-{"id": "abc123", "agent": "homeassistant", "action": "get_state",
- "input": {"entity_id": "light.kitchen"}}
-```
-```json
-{"id": "abc123", "ok": true, "result": {"state": "off"}}
-// state-changing action not in auto_approve:
-{"id": "abc123", "ok": true, "result": {...}, "requires_confirmation": true}
-// failure:
-{"id": "abc123", "ok": false, "error": "unknown action: foo"}
-```
+Task IDs are bound to a snapshot of agent/action/input. Replay returns the
+saved outcome and never invokes the adapter again within the bridge process.
+Changing the input under an existing ID is rejected. Failures consume the ID
+because a side effect may already have occurred. The cache holds at most
+10,000 IDs and fails closed when full; restart clears it. It is not durable
+exactly-once execution, and a new HTTP POST creates a new task ID. Never blindly
+retry writes after uncertain outcomes. See the root README for demo commands.
 
 ## Events
 
@@ -115,7 +112,7 @@ baseline. On a change matching the optional `match` spec (dotted key path,
 optional `from`/`to` values), the bridge pushes up the socket:
 
 ```json
-{"type": "event", "agent": "homeassistant", "event": "front_door_opened",
+{"type": "push_event", "agent": "homeassistant", "event": "front_door_opened",
  "payload": {"changed_keys": ["state", "last_changed"]}}
 ```
 
@@ -127,16 +124,17 @@ Event payloads are metadata-only (changed key names), never raw contents.
   is always initiated from the home machine. Reconnects use exponential
   backoff (1s, doubling, capped at 300s).
 - **Token file.** Pairing tokens live in `token_file` (default
-  `~/.local-agent-bridge/token`) written with mode `0600`. Delete it to
-  re-pair.
+  `~/.local-agent-bridge/token`) written with mode `0600` on POSIX; Windows security depends on directory
+  ACLs. Delete it to re-pair. This does not revoke old relay credentials; the
+  prototype clears them only when the relay restarts.
 - **HA tokens.** The Home Assistant token comes from the `HASS_TOKEN`
   environment variable (or `token:` in config). It is never logged.
 - **Command allowlist.** `command`-type actions execute only if the exact
   command string is listed in the adapter's `allowlist`, and the binary must
   exist on PATH. Anything else is refused. Task input can never inject
   arguments — the command is fixed in the config.
-- **Logging.** Logs to stdout carry only counters and metadata (agent name,
-  action name, ok/error). Tokens, pairing codes (after use), HA tokens, task
-  input contents, and event payloads are never logged.
+- **Console and logs.** Ordinary logs omit task contents. The trusted local
+  approval console intentionally displays the full task and action definition.
+  Avoid terminal recording when inputs contain sensitive data.
 - **Cloud surface.** The only cloud dependency is the relay URL itself. Local
   agent URLs stay on the LAN/loopback.

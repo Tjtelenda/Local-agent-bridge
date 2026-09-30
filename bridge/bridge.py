@@ -19,6 +19,10 @@ default ./config.yaml. NEVER put secrets in config.example.yaml.
 
 from __future__ import annotations
 
+import hashlib
+import copy
+import time
+import threading
 import argparse
 import asyncio
 import json
@@ -240,12 +244,15 @@ class BridgeConfig:
     actions: dict[tuple[str, str], dict] = field(default_factory=dict)
     auto_approve: set[str] = field(default_factory=set)
     events: list[dict] = field(default_factory=list)
+    executor: Any = field(default_factory=lambda: TaskExecutor(), repr=False)
 
     @classmethod
     def load(cls, path: str) -> "BridgeConfig":
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
 
+        if "adapters" in raw or "actions" in raw:
+            raise BridgeError("use agents with nested actions; legacy config is unsupported")
         relay_url = raw.get("relay_url", "")
         if not relay_url:
             raise BridgeError(f"config {path}: 'relay_url' is required")
@@ -259,18 +266,29 @@ class BridgeConfig:
 
         for agent in raw.get("agents", []) or []:
             name = agent["name"]
+            if not isinstance(name, str) or not name or "/" in name:
+                raise BridgeError("agent names must be nonempty strings without slashes")
             atype = agent["type"]
             if atype not in ADAPTERS:
                 raise BridgeError(f"unknown adapter type '{atype}' for agent '{name}'")
+            if name in agents:
+                raise BridgeError("duplicate agent name")
             agents[name] = agent
             for act in agent.get("actions", []) or []:
                 aname = act["name"]
-                if "read_only" not in act:
+                if not isinstance(aname, str) or not aname or "/" in aname:
+                    raise BridgeError("action names must be nonempty strings without slashes")
+                if type(act.get("read_only")) is not bool:
                     raise BridgeError(
                         f"agent '{name}' action '{aname}': "
                         "'read_only: true|false' is required")
+                if (name, aname) in actions:
+                    raise BridgeError("duplicate action name")
                 actions[(name, aname)] = act
 
+        known = {f"{agent}/{action}" for agent, action in actions}
+        if not auto_approve <= known:
+            raise BridgeError("auto_approve entries must be known agent/action pairs")
         events = raw.get("events", []) or []
         for ev in events:
             if not {"agent", "event", "interval"}.issubset(ev):
@@ -325,7 +343,7 @@ async def ensure_paired(cfg: BridgeConfig) -> str:
                 # The code is printed for the user to see; it is never
                 # written to the log.
                 print(f"\nYour pairing code is: {code}\n", flush=True)
-                print("In Muse, say 'connect my local agents' and enter "
+                print("POST /v1/pair on your relay with "
                       "this code. The bridge picks up the pairing "
                       "automatically.\n", flush=True)
                 LOG.info("waiting for pairing to complete")
@@ -358,42 +376,128 @@ async def ensure_paired(cfg: BridgeConfig) -> str:
 # Task execution
 # ---------------------------------------------------------------------------
 
-def execute_task(cfg: BridgeConfig, adapter_instances: dict[str, BaseAdapter],
-                 msg: dict) -> dict:
-    """Run one task dict {id, agent, action, input} -> reply dict."""
-    tid = msg.get("id")
-    agent_name = msg.get("agent")
-    action_name = msg.get("action")
-    task_input = msg.get("input") or {}
+APPROVAL_SECONDS = 120
+MAX_TASKS = 10000
 
-    def reply(ok: bool, **kw) -> dict:
-        d = {"id": tid, "ok": ok}
-        d.update(kw)
-        return d
 
-    agent_cfg = cfg.agents.get(agent_name)
-    if agent_cfg is None:
-        return reply(False, error=f"unknown agent: {agent_name}")
-    action = cfg.actions.get((agent_name, action_name))
-    if action is None:
-        return reply(False, error=f"unknown action: {action_name}")
+def local_approval(request: dict, deadline: float) -> bool:
+    """Trusted local console only; never accepts a decision from the relay."""
+    if not sys.stdin.isatty():
+        return False
+    # JSON escaping prevents terminal-control characters in untrusted input.
+    print("\nLOCAL APPROVAL (task data will cross the relay):\n" +
+          json.dumps(request, ensure_ascii=True, sort_keys=True), flush=True)
+    expected = "approve " + request["id"]
+    print(f"Type {expected!r} within {APPROVAL_SECONDS}s; anything else denies:",
+          flush=True)
+    if os.name == "nt":
+        import msvcrt
+        chars = []
+        while time.monotonic() < deadline:
+            if msvcrt.kbhit():
+                ch = msvcrt.getwch()
+                if ch in ("\r", "\n"):
+                    print()
+                    return "".join(chars) == expected
+                if ch == "\x03":
+                    return False
+                if ch == "\b":
+                    if chars:
+                        chars.pop()
+                        print("\b \b", end="", flush=True)
+                elif ch.isprintable():
+                    chars.append(ch)
+                    print(ch, end="", flush=True)
+            time.sleep(0.05)
+        return False
+    import select
+    ready, _, _ = select.select([sys.stdin], [], [], max(0, deadline-time.monotonic()))
+    return bool(ready) and sys.stdin.readline().strip() == expected
 
-    read_only = bool(action.get("read_only", True))
-    auto = action_name in cfg.auto_approve
-    needs_confirm = (not read_only) and (not auto)
 
-    try:
-        result = adapter_instances[agent_name].execute(action, task_input)
-    except BridgeError as e:
-        return reply(False, error=str(e))
-    except Exception as e:  # never leak tracebacks/inputs to the socket
-        return reply(False, error=f"adapter error: {type(e).__name__}")
+class TaskExecutor:
+    """Process-lifetime deduplication; no remote approval capability exists.
 
-    out = reply(True, result=result)
-    # Always explicit so the caller never has to guess: read-only or
-    # user-auto-approved actions need no confirmation; everything else does.
-    out["requires_confirmation"] = needs_confirm
-    return out
+    Snapshot the request and local action before review. Consume the task ID
+    before calling the adapter, including when execution fails. At capacity,
+    reject new tasks rather than evict replay protection.
+    """
+    def __init__(self):
+        self.seen = {}
+        self.lock = threading.Lock()
+
+    def execute(self, cfg, adapters, msg, approve=None, notify=None):
+        with self.lock:
+            return self._execute(cfg, adapters, msg, approve, notify)
+
+    def _execute(self, cfg, adapters, msg, approve, notify):
+        tid = msg.get("id")
+        def reply(status, **kw):
+            return {"id": tid, "ok": status == "completed", "status": status,
+                    "requires_confirmation": status == "pending_approval", **kw}
+        if not isinstance(tid, str) or not tid or len(tid) > 128:
+            return reply("rejected", error="invalid task id")
+        agent, name = msg.get("agent"), msg.get("action")
+        payload = msg.get("input")
+        if not isinstance(agent, str) or not isinstance(name, str):
+            return reply("rejected", error="invalid agent or action")
+        if payload is not None and not isinstance(payload, dict):
+            return reply("rejected", error="input must be an object")
+        request = copy.deepcopy({"id": tid, "agent": agent, "action": name,
+                                 "input": payload if payload is not None else {}})
+        try:
+            fingerprint = hashlib.sha256(json.dumps(
+                request, sort_keys=True, allow_nan=False).encode()).hexdigest()
+        except (TypeError, ValueError):
+            return reply("rejected", error="input must be valid JSON")
+        if tid in self.seen:
+            previous, result = self.seen[tid]
+            if previous != fingerprint:
+                return reply("rejected", error="task id already bound to another request")
+            return copy.deepcopy(result)
+        if len(self.seen) >= MAX_TASKS:
+            return reply("rejected", error="task capacity reached; local restart required")
+        action = copy.deepcopy(cfg.actions.get((agent, name)))
+        if action is None or agent not in adapters:
+            return reply("rejected", error="unknown agent or action")
+        if type(action.get("read_only")) is not bool:
+            return reply("rejected", error="invalid read_only policy")
+        needs = not action["read_only"] and f"{agent}/{name}" not in cfg.auto_approve
+        result = reply("denied", error="local approval required")
+        self.seen[tid] = (fingerprint, result)
+        if needs:
+            deadline = time.monotonic() + APPROVAL_SECONDS
+            if notify:
+                notify(reply("pending_approval", error="awaiting local terminal approval"))
+            try:
+                approved = approve(copy.deepcopy({**request, "local_action": action}), deadline) if approve else False
+            except Exception:
+                approved = False
+            if time.monotonic() >= deadline:
+                result = reply("expired", error="local approval expired")
+            elif approved is not True:
+                result = reply("denied", error="local approval denied or unavailable")
+            else:
+                result = None
+            if result is not None:
+                self.seen[tid] = (fingerprint, result)
+                return copy.deepcopy(result)
+        # Mark consumed before side effects. An error never permits an automatic retry.
+        result = reply("failed", error="execution interrupted; outcome unknown")
+        self.seen[tid] = (fingerprint, result)
+        try:
+            value = adapters[agent].execute(action, request["input"])
+            result = reply("completed", result=value)
+        except Exception as exc:
+            result = reply("failed", error=f"adapter error: {type(exc).__name__}")
+        self.seen[tid] = (fingerprint, copy.deepcopy(result))
+        return result
+
+
+def execute_task(cfg, adapter_instances, msg, approve=None, notify=None):
+    if cfg.executor is None:
+        cfg.executor = TaskExecutor()
+    return cfg.executor.execute(cfg, adapter_instances, msg, approve, notify)
 
 
 # ---------------------------------------------------------------------------
@@ -541,8 +645,23 @@ async def _run_with_auth(cfg: BridgeConfig, token: str,
                 except ValueError:
                     LOG.warning("ignoring non-JSON frame")
                     continue
+                if not isinstance(msg, dict):
+                    continue
                 if msg.get("type") == "task":
-                    reply = execute_task(cfg, adapter_instances, msg)
+                    loop = asyncio.get_running_loop()
+                    def notify(reply):
+                        asyncio.run_coroutine_threadsafe(
+                            send({"type": "task_reply", **reply}), loop).result()
+                    cancelled = threading.Event()
+                    def approve(request, deadline):
+                        decision = local_approval(request, deadline)
+                        return (decision is True and not cancelled.is_set()
+                                and ws.state.name == "OPEN")
+                    try:
+                        reply = await asyncio.to_thread(
+                            execute_task, cfg, adapter_instances, msg, approve, notify)
+                    finally:
+                        cancelled.set()
                     LOG.info("task: agent=%s action=%s ok=%s",
                              msg.get("agent"), msg.get("action"), reply["ok"])
                     await send({"type": "task_reply", **reply})

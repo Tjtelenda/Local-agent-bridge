@@ -6,13 +6,14 @@ Wants=network-online.target
 [Service]
 Type=simple
 # Adjust paths to your install. The bridge needs no inbound ports.
-ExecStart=/usr/bin/python3 /home/%i/local-agent-bridge/bridge/bridge.py --config /home/%i/local-agent-bridge/bridge/config.yaml
+# Headless service: writes requiring local terminal approval are denied.
+ExecStart=%h/local-agent-bridge/.venv/bin/python %h/local-agent-bridge/bridge/bridge.py --config %h/local-agent-bridge/bridge/config.yaml
 Restart=on-failure
 RestartSec=10
 # The bridge reads HASS_TOKEN (Home Assistant token) only from the
 # environment; keep it out of the config file. If you use the
 # homeassistant adapter, set it here via EnvironmentFile, e.g.:
-#   EnvironmentFile=/home/%i/.local-agent-bridge/env
+#   EnvironmentFile=%h/.local-agent-bridge/env
 Environment=PYTHONUNBUFFERED=1
 NoNewPrivileges=true
 

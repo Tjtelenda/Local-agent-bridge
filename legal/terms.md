@@ -16,7 +16,7 @@ your agents take.
 ## 3. Confirmations
 
 The bridge marks capabilities as read-only or state-changing. State-changing
-actions are flagged so Muse asks for your confirmation first — unless you've
+actions require approval at the local bridge terminal before execution — unless you've
 explicitly set an auto-approve rule in your own bridge config. That choice, and
 its consequences, are yours.
 
