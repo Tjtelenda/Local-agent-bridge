@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Privacy Policy — Local Agent Bridge</title>
-  <meta name="description" content="Privacy policy for Local Agent Bridge: we collect and hold no information.">
+  <meta name="description" content="Privacy policy for Local Agent Bridge: task inputs and results pass through relay memory.">
   <link rel="icon" type="image/png" href="assets/icon-512.png">
   <link rel="stylesheet" href="assets/style.css">
 </head>
@@ -30,23 +30,23 @@
     <h2>Privacy <span class="accent">Policy</span></h2>
     <p class="policy-meta"><em>Last updated: September 19, 2026</em></p>
 
-    <p><strong>The short version: we collect and hold no information about you.</strong></p>
+    <p><strong>The short version: task inputs and results pass through relay memory and may contain personal information.</strong></p>
 
     <h3>Who we are</h3>
     <p>Local Agent Bridge is built and operated by Trent Telenda, an independent developer. Contact: <a href="mailto:tjtelendallc@gmail.com" style="color: var(--teal);">tjtelendallc@gmail.com</a></p>
 
     <h3>How the service works</h3>
-    <p>You run a small open-source bridge app on your own machine. It connects outward to our relay, which passes task requests and responses between Muse and your bridge. That is all the relay does.</p>
+    <p>You run a small open-source bridge app on your own machine. It connects outward to our relay, which passes task requests and responses between an API client and your bridge. That is all the relay does.</p>
 
-    <h3>What we store: nothing</h3>
+    <h3>What is held in memory</h3>
     <ul>
-      <li>Task contents are held in memory only while being delivered, then discarded. They are never written to disk.</li>
+      <li>The application holds task results in relay memory for five minutes by default, then removes them within another minute. It does not write task contents to disk. The bridge caches task outcomes locally in process memory for replay protection.</li>
       <li>We keep no logs of message contents, no analytics, no tracking, and no cookies on the website.</li>
-      <li>We have no user accounts. The only identifier is a random pairing token that links your bridge to your Muse session. It contains no personal information, and you can revoke it at any time by re-pairing or deleting the bridge.</li>
+      <li>We have no user accounts. The only identifier is a random pairing token that links your bridge to an API client. It contains no personal information, and it remains valid in relay memory until the relay restarts. Deleting the local token does not revoke relay credentials.</li>
     </ul>
 
     <h3>What we never do</h3>
-    <p>We never sell, share, or monetize any data passing through the relay — because we don't retain any. We cannot see your local agents, your home network, or anything else on your machine; the bridge only sends what a task explicitly asks for.</p>
+    <p>Task inputs and adapter results reach the relay and may contain sensitive data. Local adapter configuration and credentials are not registered with the relay. The local approval console displays inputs for review. Meta/Muse delivery is currently a logging stub.</p>
 
     <h3>Changes</h3>
     <p>If this policy ever changes, the updated version will be posted here with a new date. Continued use of the service means you accept the changes.</p>

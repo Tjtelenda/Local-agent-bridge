@@ -1,17 +1,22 @@
 # Local Agent Bridge — Relay API
 
-The cloud component of Local Agent Bridge: a FastAPI service that Meta's Muse
-connector platform calls over HTTPS, and that users' local bridge daemons dial
-OUT to over a persistent WebSocket. **The relay never dials in to anyone's
-home.** Task payloads live in memory only with a 5-minute TTL; nothing is
-written to disk and no message contents are ever logged.
+The prototype FastAPI relay accepts authenticated HTTP task requests and routes
+them to a local bridge over an outbound WebSocket. The local protocol and
+synthetic demo work. Meta/Muse connector integration is not implemented;
+`MetaDeliveryAdapter` only logs event metadata, not external delivery.
+
+Application submitted to the Meta Connections team; review and approval are pending.
+This is the maintainer-reported application status, not approval or a guarantee
+of approval. Task inputs and results cross relay memory; results expire after
+the configured TTL. The application does not write task contents to disk.
 
 ## Run
 
 ```bash
+cd relay  # from repository root
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app:app --host 0.0.0.0 --port 8000
+python -m uvicorn app:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
 Or with Docker:
@@ -22,7 +27,7 @@ docker run -p 8000:8000 lab-relay
 ```
 
 Environment knobs: `TASK_TIMEOUT_SECONDS` (default 30), `TASK_TTL_SECONDS`
-(default 300), `CODE_TTL_SECONDS` (default 600), `PORT` (default 8000).
+(default 300), `CODE_TTL_SECONDS` (default 600), `PORT` (Docker only, default 8000). Run one worker; state is in memory.
 
 ## Auth
 
@@ -32,7 +37,7 @@ Environment knobs: `TASK_TIMEOUT_SECONDS` (default 30), `TASK_TTL_SECONDS`
   connector spec**. Currently keys are issued by `POST /v1/pair` and held in
   memory only.
 - **Bridge WebSocket** (`/v1/bridge`): the pairing token issued at pair time,
-  passed as `?token=<pairing_token>`. The one exception is the initial
+  offered as a WebSocket subprotocol (avoid the legacy query-token URL). The one exception is the initial
   code-registration handshake, which connects anonymously.
 - `POST /v1/pair` is unauthenticated by design: the 8-char device code is the
   credential (device-code flow).
@@ -76,7 +81,7 @@ Relay → bridge:
 Pairing flow: bridge connects anonymously → `request_code` → user sees the
 code in the bridge UI → user gives the code to Muse → Muse calls
 `POST /v1/pair` → relay returns `api_key` (for Muse's HTTP calls) and
-`pairing_token` (user pastes into bridge config) → bridge reconnects offering
+`pairing_token` (automatically delivered to the waiting bridge and saved in token_file) → bridge reconnects offering
 the pairing token as a WebSocket subprotocol and calls `register_agents`.
 
 ## How the Meta-connector adapter layer attaches
@@ -102,3 +107,24 @@ The seam is `meta_adapter.py: MetaDeliveryAdapter` (see the TODO in the file):
 - Logs carry only counters: tasks relayed, task errors, events by type,
   pairings completed. Never contents, codes, tokens, or keys.
 - `/v1/agents` strips agent configs down to name / `read_only` / description.
+
+## Approval and result ownership
+
+Writes requiring approval first return `status: pending_approval`, `ok: false`,
+and `requires_confirmation: true`. Only the bridge's local terminal can approve
+them; the relay has no approval endpoint. Poll the returned ID for the final
+outcome. The pending and final replies share that ID. Only the paired bridge's
+active socket can supply replies; another API key cannot read those results.
+Terminal replies cannot be overwritten. Expired results cannot be resurrected.
+
+Keep `TASK_TTL_SECONDS` above the bridge's 120-second approval window plus
+execution time. Logical expiry is immediate; the sweeper removes expired
+entries within another 60 seconds. Each POST creates a new ID, so it is not an
+idempotent retry API. Connection failures can leave an uncertain action outcome.
+Pairings disappear on relay restart; re-pair the bridge then. No revocation API
+or durable task store exists in this prototype.
+
+Task inputs/results cross the relay and may contain sensitive information.
+An event marked accepted means the logging stub accepted it, not that Meta
+received it. The synthetic demo in the root README tests this local protocol
+without claiming external delivery.

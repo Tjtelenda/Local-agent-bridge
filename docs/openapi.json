@@ -119,7 +119,7 @@
           "tasks"
         ],
         "summary": "Submit Task",
-        "description": "Submit a task to a local agent via the caller's paired bridge.\n\nForwards over the bridge's socket and waits for its reply (configurable\ntimeout). The response always surfaces `requires_confirmation` so Muse\nknows to ask the user before state-changing actions.",
+        "description": "Submit a task to a local agent via the caller's paired bridge.\n\nForwards over the bridge's socket and waits for its reply (configurable\ntimeout). A pending_approval response means no action has executed.\nApproval occurs only at the local bridge terminal; poll GET for completion.",
         "operationId": "submit_task_v1_tasks_post",
         "parameters": [
           {

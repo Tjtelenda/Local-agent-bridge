@@ -10,9 +10,7 @@ token_file: "~/.local-agent-bridge/token"
 
 # Actions that may run without user confirmation, even when read_only: false.
 # Stored on the user's own machine; routine, low-risk actions only.
-auto_approve:
-  - light_turn_on
-  - light_turn_off
+auto_approve: []  # optional exact pairs, e.g. [system/uptime]
 
 agents:
   # ---- Hermes: local AI agent with an HTTP API ----
@@ -58,7 +56,7 @@ agents:
     url: "http://localhost:9999/hook"
     actions:
       - name: send_notification
-        read_only: true
+        read_only: false
         description: "Forward a message to a local notification sink."
 
   # ---- Command: shell exec, allowlist only ----
